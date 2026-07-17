@@ -1,3 +1,5 @@
+import enum
+
 from sqlalchemy.inspection import inspect
 
 def orn_to_dict(obj, include_relationships=False) -> dict | None:
@@ -14,7 +16,8 @@ def orn_to_dict(obj, include_relationships=False) -> dict | None:
     mapper = inspect(obj) ## Позволяет получить данные объекта из SQLAlchemy
     
     for column in mapper.mapper.column_attrs:
-        data[column.key] = getattr(obj, column.key)
+        val = getattr(obj, column.key)
+        data[column.key] = val.value if isinstance(val, enum.Enum) else val
     
     if include_relationships:
         for name, relation in mapper.mapper.relationships.items():

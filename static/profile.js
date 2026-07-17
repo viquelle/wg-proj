@@ -1,266 +1,213 @@
+// profile.js
 async function getProfile() {
-    const response = await fetch('/api/profile')
- 	const data = await response.json();
-	return data
+    const res = await fetch('/api/profile');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
 }
 
-// helper: название месяца буквами
 function formatDateToRussian(dateStr) {
     if (!dateStr) return "—";
-    const date = new Date(dateStr);
-    const options = { day: "numeric", month: "long" }; // "13 октября"
-    return date.toLocaleDateString("ru-RU", options).replace(" ","\u00A0");
+    return new Date(dateStr)
+        .toLocaleDateString("ru-RU", { day: "numeric", month: "long" })
+        .replace(" ", "\u00A0");
 }
 
-// helper: создать элемент карусели
-function createCarouselItem(content) {
-    const item = document.createElement("div");
-    item.classList.add("carousel__item");
-    item.innerHTML = content;
-    return item;
-}
-
-// helper: создать элемент с прогрессбаром
-function createProgressItem(label, value, max) {
-	
-    const percent = Math.min(100, (value / max) * 100);
-	
-	const color = value > max ? "background-color: #e74c3c" : "";
-    return createCarouselItem(`
-        <span>${label}: ${value}/${max}</span>
-        <div class="progress">
-            <div class="progress__bar" style="width: ${percent}%; ${color}"></div>
-        </div>
-    `);
-}
-
-// строим профиль
 async function buildProfile() {
-	
-	const data = await getProfile
-();
+    const data = await getProfile();
+
     // Навбар
     document.querySelector(".user-ip").textContent = data.ip;
     document.querySelector(".user-name").textContent = data.username;
-	const statusObj = document.querySelector(".user-status");
-	const root = getComputedStyle(document.documentElement);
-	switch (data.status) {
-		case "active":
-			statusObj.textContent = "АКТИВЕН";
-			statusObj.style.color = root.getPropertyValue('--status-active');
-			break;
-		case "restricted":
-			statusObj.textContent = "ОГРАНИЧЕН";
-			statusObj.style.color = root.getPropertyValue('--status-restricted');
-			break;
-		case "blocked":
-			statusObj.textContent = "ЗАБЛОКИРОВАН";
-			statusObj.style.color = root.getPropertyValue('--status-blocked');
-			break;
-		case "inactive":
-			statusObj.textContent = "НЕАКТИВЕН";
-			statusObj.style.color = root.getPropertyValue('--status-blocked');
-			break;
-		default:
-			statusObj.textContent = "Не определено";
-			break;
-	}
+
+    const statusEl = document.querySelector(".user-status");
+    const statusMap = {
+        active: ["АКТИВЕН", "--status-active"],
+        restricted: ["ОГРАНИЧЕН", "--status-restricted"],
+        inactive: ["НЕАКТИВЕН", "--status-blocked"]
+    };
+
+    const [text, colorVar] = statusMap[data.status] || ["Не определено", "--status-blocked"];
+    statusEl.textContent = text;
+    statusEl.style.color = getComputedStyle(document.documentElement)
+        .getPropertyValue(colorVar);
 
     // Баланс
-    document.querySelector(".balance__amount").textContent = `${data.balance} р.`;
+    document.querySelector(".balance__amount").textContent = `${data.balance} ₽`;
     document.querySelector(".balance__next").textContent =
         "Следующее списание:\u00A0" + formatDateToRussian(data.next_payment);
 
     // Тариф
     const tariffHeader = document.querySelector(".tariff-card .card__header");
-    tariffHeader.textContent = `Тариф: "${data.tariff.name}"`;
+    tariffHeader.textContent = `Тариф: "${data.tariff?.name || 'Не назначен'}"`;
 
     const tariffTrack = document.querySelector(".tariff-card .carousel__track");
-    tariffTrack.innerHTML = ""; // очистить
-
-    tariffTrack.appendChild(createCarouselItem(`Итоговая скорость: ${data._tc_speed}\u00A0Мбит/с`));
-    tariffTrack.appendChild(
-        createProgressItem("Устройства", data.devices.length, data.tariff.devices_count + data.extra_devices)
-    );
-    tariffTrack.appendChild(
-        createProgressItem("Места", 1 + data.extra_users, data.tariff.users_count + data.extra_users)
-    );
+    tariffTrack.innerHTML = `
+        <div class="carousel__item">Скорость: ${data.speed || 0} Мбит/с</div>
+        <div class="carousel__item">Устройств: ${data.devices.length}</div>
+        <div class="carousel__item">Ежемесячно: ${data.monthly_fee || 0} ₽</div>
+    `;
 
     // Устройства
-	
-	const devicesOption = document.getElementById("devices-option");
-	if	(data.devices.length < data.tariff.devices_count + data.extra_devices) {
-		devicesOption.classList.remove("hidden");
-	}
+    const devicesOption = document.getElementById("devices-option");
+    if (devicesOption) {
+        devicesOption.classList.add("hidden");
+    }
+
     const devicesTrack = document.getElementById("devices-track");
-    devicesTrack.innerHTML = ""; // очистить
+    devicesTrack.innerHTML = "";
 
     data.devices.forEach(dev => {
-        devicesTrack.appendChild(createCarouselItem(`<div class="device__item" onclick="openDeviceModal('${dev.ip}')">
-            <span class="device__ip">${dev.ip}</span>
-			<span class="device__name">${dev.name}</span>
-            <span class="device__status status-${dev._pending_delete ? 'inactive' : dev.status}">${dev._pending_delete ? "В процессе удаления..." : dev.status === "active" ? 'Активно' : 'Неактивно'}</span></div>
-        `));
+        const statusText = dev.status === "active" ? "Активно" : "Неактивно";
+        const statusClass = dev.status === "active" ? "status-active" : "status-inactive";
+
+        devicesTrack.innerHTML += `
+            <div class="carousel__item device__item" onclick="openDeviceModal('${dev.ip}')">
+                <span class="device__ip">${dev.ip}</span>
+                <span class="device__name">${dev.name}</span>
+                <span class="device__status ${statusClass}">${statusText}</span>
+            </div>
+        `;
     });
 }
 
 window.onload = buildProfile;
 
-function openModal(id){
-	const modal = document.getElementById(id);
-	if (!modal) return;
-	modal.classList.add("show");
-	openModalBG();
+// ==================== МОДАЛКИ ====================
+function openModal(id) {
+    const modal = document.getElementById(id);
+    if (modal) {
+        modal.classList.add("show");
+        openModalBG();
+    }
 }
 
-function closeModal(id){
-	const modal = document.getElementById(id);
-	if (!modal) return;
-	modal.classList.remove("show");
-	closeModalBG();
+function closeModal(id) {
+    const modal = document.getElementById(id);
+    if (modal) {
+        modal.classList.remove("show");
+        closeModalBG();
+    }
 }
 
-function openModalBG(){
-	const BG = document.getElementById("modal-bg");
-	if (!BG) return;
-	BG.classList.add("show");
+function openModalBG() {
+    const bg = document.getElementById("modal-bg");
+    if (bg) {
+        bg.classList.add("show");
+    }
 }
 
-function closeModalBG(){
-	const BG = document.getElementById("modal-bg");
-	const activeModals = document.querySelectorAll('.modal-content.show').length;
-	if (activeModals === 0){
-		BG.classList.remove("show");
-	}
+function closeModalBG() {
+    const opened = document.querySelectorAll(".modal-content.show").length;
+    const bg = document.getElementById("modal-bg");
+
+    if (!opened && bg) {
+        bg.classList.remove("show");
+    }
 }
 
-async function copyOnClick(el){
-	try {
-		await navigator.clipboard.writeText(el.value);
-		console.log('Текст скопирован в буфер обмена');
-	} catch (err) {
-		console.error('Ошибка при копировании:', err);
-	}
+async function copyOnClick(el) {
+    try {
+        await navigator.clipboard.writeText(el.value);
+    } catch (_) {}
 }
 
-async function openDeviceModal(targetip){
-	openModal("editDeviceModal");
-	
-	const name = document.getElementById("deviceEditName");
-	const ip = document.getElementById('ipEdit');
-	const publickey = document.getElementById("publickeyEdit");
-	const status = document.getElementById("statusEdit");
-	
-	try {
-		const resp = await fetch("/api/getDevice", {
-			method:  'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ip: targetip})
-		});
-		if (!resp.ok){
-			const text = await resp.json();
-			let errMsg = text.error || JSON.stringify(text);
-			
-			throw new Error(`HTTP ${resp.status}: ${errMsg}`);
-		}
-		
-		const data = await resp.json();
-		name.value = data.name;
-		ip.value = data.ip;
-		publickey.value  = data.public_key;
-		status.checked = data.status === "active";
-	} catch (err) {
-		console.error(err);
-		name.value = 'Что-то пошло не так';
-		ip.value = "Что-то пошло не так";
-		publickey.value = 'Что-то пошло не так';
-		status.checked = false;
-	}
-	
+async function openDeviceModal(targetip) {
+    openModal("editDeviceModal");
+
+    try {
+        const res = await fetch("/api/getDevice", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ip: targetip })
+        });
+
+        if (!res.ok) {
+            throw new Error((await res.json()).error);
+        }
+
+        const d = await res.json();
+
+        document.getElementById("deviceEditName").value = d.name;
+        document.getElementById("ipEdit").value = d.ip;
+        document.getElementById("publickeyEdit").value = d.public_key;
+        document.getElementById("statusEdit").checked = d.status === "active";
+    } catch (e) {
+        console.error(e);
+        alert("Ошибка загрузки устройства: " + e.message);
+        closeModal("editDeviceModal");
+    }
 }
 
+async function addDevice() {
+    closeModal("addDeviceModal");
+    openModal("keysModal");
 
-async function addDevice(){
-	
-	closeModal('addDeviceModal'); 
-	openModal('keysModal');
-	
-	const name = document.getElementById("deviceName").value.trim();
-	const privEl = document.getElementById('privateKey');
-	const pubEl = document.getElementById('publicKey');
-	try {
-		const resp = await fetch('/api/addDevice', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({name: name})
-		});
-		
-		if (!resp.ok) {
-			const text = await resp.json();
-			let errMsg = text.error || JSON.stringify(text);
-			
-			throw new Error(`HTTP ${resp.status}: ${errMsg}`);
-		}
-		
-		const data = await resp.json();
-		privEl.value = data.private_key;
-		pubEl.value = data.public_key;
-		
-	} catch (err) {
-		console.error(err);
-		privEl.value = 'Что-то пошло не так';
-		pubEl.value = 'Что-то пошло не так';
-		alert('Ошибка при создании устройства: '+ (err.message || err));
-	}
-	
+    const name = document.getElementById("deviceName").value.trim();
+
+    try {
+        const res = await fetch("/api/addDevice", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: name || "Новое устройство" })
+        });
+
+        if (!res.ok) {
+            throw new Error((await res.json()).error);
+        }
+
+        const d = await res.json();
+
+        document.getElementById("privateKey").value = d.private_key;
+        document.getElementById("publicKey").value = d.public_key;
+    } catch (e) {
+        console.error(e);
+        alert("Ошибка создания: " + e.message);
+        closeModal("keysModal");
+    }
 }
 
 async function deleteDevice() {
-	const ip = document.getElementById("ipEdit").value;
-	try {
-		const resp = await fetch('api/deleteDevice', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ip: ip})
-		});
-		
-		if (!resp.ok) {
-			const text = await resp.json();
-			let errMsg = text.error || JSON.stringify(text);
-			
-			throw new Error(`HTTP ${resp.status}: ${errMsg}`);
-		}
-		
-		const data = await resp.json();
-		console.log(data);
-	} catch (err) {
-		console.log(err);
-	}
-	location.href = location.href;
+    const ip = document.getElementById("ipEdit").value;
+
+    if (!confirm("Удалить устройство " + ip + "?")) {
+        return;
+    }
+
+    try {
+        const res = await fetch("/api/deleteDevice", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ip })
+        });
+
+        if (!res.ok) {
+            throw new Error((await res.json()).error);
+        }
+
+        location.reload();
+    } catch (e) {
+        alert("Ошибка: " + e.message);
+    }
 }
 
 async function editDevice() {
-	const ip = document.getElementById("ipEdit").value;
-	const name = document.getElementById("deviceEditName").value;
-	const status = document.getElementById("statusEdit").checked;
-	try {
-		const resp = await fetch('api/editDevice', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ip: ip, name: name, status: status})
-		});
-		
-		if (!resp.ok) {
-			const text = await resp.json();
-			let errMsg = text.error || JSON.stringify(text);
-			
-			throw new Error(`HTTP ${resp.status}: ${errMsg}`);
-		}
-		
-		const data = await resp.json();
-		console.log(data);
-	} catch (err) {
-		console.log(err);
-	}
-	location.href = location.href;
+    const ip = document.getElementById("ipEdit").value;
+    const name = document.getElementById("deviceEditName").value;
+    const active = document.getElementById("statusEdit").checked;
+
+    try {
+        const res = await fetch("/api/editDevice", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ip, name, status: active })
+        });
+
+        if (!res.ok) {
+            throw new Error((await res.json()).error);
+        }
+
+        location.reload();
+    } catch (e) {
+        alert("Ошибка: " + e.message);
+    }
 }

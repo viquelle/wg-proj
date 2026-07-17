@@ -1,43 +1,115 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Ошибка</title>
-  <style>
-    body {
-      margin: 0;
-      font-family: Arial, sans-serif;
-      background: #f8f9fa;
-      color: #222;
-      display: flex;
-      flex-direction: column;
-      height: 100vh;
-      text-align: center;
-    }
-    .container {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      padding: 20px;
-    }
-    .error-code {
-      font-size: 3rem;
-      font-weight: bold;
-      color: #e63946;
-      margin-bottom: 20px;
-    }
-    .error-desc {
-      font-size: 1.2rem;
-      color: #555;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ошибка {{ code }}</title>
+    <style>
+        :root {
+            --bg: #f6ede3;
+            --card: rgba(255, 248, 241, 0.9);
+            --text: #36211c;
+            --muted: #87675c;
+            --accent: #a33a31;
+            --line: rgba(111,74,59,0.15);
+            --shadow: 0 18px 48px rgba(84, 55, 43, 0.16);
+        }
+
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: grid;
+            place-items: center;
+            padding: 18px;
+            font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            color: var(--text);
+            background:
+                radial-gradient(circle at top left, rgba(163,58,49,0.12), transparent 28%),
+                radial-gradient(circle at bottom right, rgba(122,70,43,0.12), transparent 25%),
+                linear-gradient(180deg, #f8f0e5 0%, #f2e5d7 100%);
+        }
+
+        .card {
+            width: min(100%, 460px);
+            background: var(--card);
+            border: 1px solid rgba(255,255,255,0.7);
+            border-radius: 28px;
+            box-shadow: var(--shadow);
+            padding: 28px 24px;
+            text-align: center;
+        }
+
+        .code {
+            display: inline-block;
+            min-width: 96px;
+            padding: 10px 16px;
+            border-radius: 999px;
+            background: rgba(163,58,49,0.12);
+            color: var(--accent);
+            font-size: 14px;
+            font-weight: 900;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+
+        h1 {
+            margin: 16px 0 10px;
+            font-size: 32px;
+            line-height: 1.02;
+            letter-spacing: -0.04em;
+        }
+
+        p {
+            margin: 0;
+            color: var(--muted);
+            font-size: 15px;
+            line-height: 1.45;
+        }
+
+        .actions {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-top: 22px;
+        }
+
+        .btn {
+            appearance: none;
+            border: none;
+            outline: none;
+            cursor: pointer;
+            border-radius: 16px;
+            padding: 12px 16px;
+            font: inherit;
+            font-weight: 800;
+            text-decoration: none;
+            transition: transform .18s cubic-bezier(.2, .9, .2, 1.08), box-shadow .18s ease;
+        }
+
+        .btn:active { transform: scale(.97); }
+        .btn-primary {
+            background: linear-gradient(180deg, #a33a31 0%, #7a2e27 100%);
+            color: #fff;
+            box-shadow: 0 10px 24px rgba(163,58,49,.24);
+        }
+        .btn-ghost {
+            background: rgba(255,255,255,0.72);
+            color: var(--text);
+            border: 1px solid var(--line);
+        }
+    </style>
 </head>
 <body>
-  <div class="container">
-    <div class="error-code" id="errorCode">Ошибка {{ code }}</div>
-    <div class="error-desc" id="errorDesc">{{ desc or "Что-то пошло не так" }}</div>
-  </div>
+    <div class="card">
+        <div class="code">Ошибка {{ code }}</div>
+        <h1>{{ desc or "Что-то пошло не так" }}</h1>
+        <p>. . .</p>
+        <div class="actions">
+            <a class="btn btn-primary" href="/">На главную</a>
+            <a class="btn btn-ghost" href="/admin">В админку</a>
+        </div>
+    </div>
 </body>
 </html>

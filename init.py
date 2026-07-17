@@ -1,60 +1,53 @@
+#!/usr/bin/env python3
 import os
+import sys
 
-SETTINGS_PATH = os.path.join("config", "settings.py")
-DB_PATH = os.path.join("database", "vpn.db")
+from sqlalchemy.orm import sessionmaker
 
-def create_settings():
-    if not os.path.exists("config"):
-        os.makedirs("config")
-        print("Создана папка config")
-    if not os.path.exists(SETTINGS_PATH):
-        with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
-            f.write("""# Создан с помощью init.py
-import os
 
-IS_PROD = False
-BASE_DIR = os.path.dirname(os.path.dirname(__file__))
-INTERFACE_NAME = "awg0" ## DST !!!
-MIRROR_INTERFACE_NAME = "ifb0" ## SRC !!!
-SPEED_CEIL = 600 ## Mbit
-SUBNET_PREFIX = "10.88.88."
-DATABASE_PATH = os.path.join(BASE_DIR, "database", "vpn.db")
-SERVER_PUBLIC_KEY = ""
-ENDPOINT = "123.231.123.231:51820"
-            """)
-        print(f"[+] Создан файл {SETTINGS_PATH}")
+def setup_project():
+    print("[INIT] Настройка проекта...")
+
+    # 1. Создаем папки
+    for folder in ["config", "database", "logs"]:
+        os.makedirs(folder, exist_ok=True)
+        print(f"  ✅ Папка /{folder} готова")
+
+    # 2. Создаем config/settings.py, если нет
+    settings_path = os.path.join("config", "settings.py")
+    if not os.path.exists(settings_path):
+        with open(settings_path, "w", encoding="utf-8") as f:
+            f.write("""import os
+DEBUG = False
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATABASE_PATH = os.path.join(BASE_DIR, "database", "database.db")
+LOG_DIR = os.path.join(BASE_DIR, "logs")
+INTERFACE_NAME = "wg0"
+MIRROR_INTERFACE_NAME = "ifb0"
+SPEED_CEIL = 600
+SUBNET_PREFIX = "10.0.0."
+SERVER_IP = 127.0.0.1 ## измените это на IP вашего сервера
+""")
+        print("  ✅ config/settings.py создан")
     else:
-        print(f"[=] {SETTINGS_PATH} уже существует")
-        
-def init_db():
+        print("  ⚠️ config/settings.py уже существует")
+
+    # 3. Инициализируем БД
     from database import Base, engine
-    import database.models
-    if os.path.exists(DB_PATH):
-        print(f"[=] База уже существует")
-        return
-    
-    Base.metadata.create_all(engine)
-    print(f"[+] База данных создана")
-    
-def add_plugs_into_db():
-    from database import SessionLocal
-    from database.models import Tariff
-    session = SessionLocal()
-    try:
-        tariff = Tariff(id=-1, name="НЕСУЩЕСТВУЮЩИЙ", description="НЕ ИСПОЛЬЗОВАТЬ")
-        session.add(tariff)
-        session.commit()
-        print(f"[+] Добавлен тариф -1")
-    except Exception as e:
-        session.rollback()
-        print(f"[?] Не получилось добавить тариф -1, возможно, уже существует")
-    finally:
-        session.close()
-        
+    import database.models  # Важно для регистрации моделей
+    if not os.path.exists("database/vpn.db"):
+        Base.metadata.create_all(engine)
+        Session = sessionmaker(bind=engine)
+        session = Session()
+        print("  ✅ База данных создана")
+    else:
+        print("  ⚠️ База данных уже существует")
+
+
+    print("[INIT] Готово. Можешь запускать проект.")
+    input("Нажми Enter для выхода...")
+
+
 if __name__ == "__main__":
-    create_settings()
-    init_db()
-    add_plugs_into_db()
-    print("=== ГОТОВО ===")
-    
-    input("\nСкебоб")
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    setup_project()
