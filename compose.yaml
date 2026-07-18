@@ -2,7 +2,7 @@ services:
   app:
     build: .
     container_name: vpn-app
-    network_mode: host
+##    network_mode: host
     cap_add:
       - NET_ADMIN
     ports:

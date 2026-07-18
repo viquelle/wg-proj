@@ -17,16 +17,17 @@ def setup_project():
     settings_path = os.path.join("app/config", "settings.py")
     if not os.path.exists(settings_path):
         with open(settings_path, "w", encoding="utf-8") as f:
-            f.write("""import os
-DEBUG = False
+            f.write("""DEBUG = bool(os.getenv('DEBUG'))
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATABASE_PATH = os.path.join(BASE_DIR, "database", "database.db")
+DATABASE_URL = os.getenv("DATABASE_URL")
 LOG_DIR = os.path.join(BASE_DIR, "logs")
-INTERFACE_NAME = "wg0"
+INTERFACE_NAME = "awg0"
 MIRROR_INTERFACE_NAME = "ifb0"
 SPEED_CEIL = 600
-SUBNET_PREFIX = "10.0.0."
-SERVER_IP = 127.0.0.1 ## измените это на IP вашего сервера
+SUBNET_PREFIX = "10.10.10."
+SERVER_PUBLIC_KEY = ""
+SERVER_ENDPOINT = "111.222.233.244:55667"
+SERVER_CONFIG_DATA = "\n## Тут можно вставить Jc, Jmax...\n"
 """)
         print("  ✅ config/settings.py создан")
     else:
@@ -37,7 +38,6 @@ SERVER_IP = 127.0.0.1 ## измените это на IP вашего серве
     if not os.path.exists("data/vpn.db"):
         Base.metadata.create_all(engine)
         Session = sessionmaker(bind=engine)
-        session = Session()
         print("  ✅ База данных создана")
     else:
         print("  ⚠️ База данных уже существует")

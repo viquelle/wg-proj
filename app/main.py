@@ -1,363 +1,385 @@
-from datetime import datetime
-
+from datetime import datetime, timedelta
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.encoders import jsonable_encoder
-from fastapi.params import Body
-from fastapi.responses import JSONResponse, HTMLResponse
-from fastapi.templating import Jinja2Templates
-from starlette.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse, Response
+from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.openapi.utils import get_openapi
+from pydantic import BaseModel
 
 import config.settings
 from database import get_session
 from database.models import User, Device, UserRoles, Payment
-from services.awg import generate_keys, is_valid_key
+from services.awg import generate_keys, is_valid_key, get_public_key
 from utils.utils import orn_to_dict
-from config.settings import SUBNET_PREFIX
+from config.settings import SUBNET_PREFIX, SERVER_CONFIG_DATA
 
-app = FastAPI()
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
+app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+
+
+# --- Pydantic Models (Исправлены опечатки) ---
+class UserCreate(BaseModel):
+    username: str = "Пользователь"
+    role: UserRoles = UserRoles.REGULAR
+    next_payment: datetime = datetime.now() + timedelta(days=30)
+    balance: float = 0
+    monthly_fee: float = 0
+    speed: int = 20
+    description: str = ""
+
+
+class UserUpdate(BaseModel):
+    username: str | None = None
+    role: UserRoles | None = None
+    next_payment: datetime | None = None
+    balance: float | None = None
+    monthly_fee: float | None = None
+    speed: int | None = None
+    description: str | None = None
+
+
+class DeviceCreate(BaseModel):
+    name: str = "Устройство"
+    ip_suffix: int = 0
+    public_key: str | None = None
+
+
+class DeviceUpdate(BaseModel):
+    name: str | None = None
+    ip_suffix: int | None = None
+    public_key: str | None = None
+
+
+class PaymentCreate(BaseModel):
+    amount: float
+    desc: str = ""
+
+
+class PaymentUpdate(BaseModel):
+    amount: float | None = None
+    desc: str | None = None
+    date: datetime | None = None
 
 
 def get_request_ip(request: Request) -> str | None:
-    if config.settings.DEBUG:
-        return "10.14.201.2"
-    return request.client.host if request.client else None
+    return SUBNET_PREFIX+"2" if config.settings.DEBUG else (request.client.host if request.client else None)
 
 
 def get_current_user(session, request: Request) -> User | None:
     ip = get_request_ip(request)
-    if not ip:
-        return None
-    return User.get_by_ip(session, ip)
+    return User.get_by_ip(session, ip) if ip else None
 
-
-def is_admin(user: User | None) -> bool:
-    return user is not None and user.role == UserRoles.ADMIN
 
 def require_admin(session, request: Request) -> User:
     user = get_current_user(session, request)
-
-    if not is_admin(user):
+    if not user or user.role != UserRoles.ADMIN:
         raise HTTPException(status_code=403, detail="Недостаточно прав")
-
     return user
 
-@app.get("/", response_class=HTMLResponse)
-async def client_page(request: Request):
-    return templates.TemplateResponse(request=request, name="client.html", context={})
+
+@app.get("/openapi.json", include_in_schema=False)
+def openapi(request: Request):
+    with get_session() as session: require_admin(session, request)
+    return JSONResponse(get_openapi(title=app.title, version=app.version, routes=app.routes))
 
 
-## ADMIN
+@app.get("/docs", include_in_schema=False)
+def docs(request: Request):
+    with get_session() as session: require_admin(session, request)
+    return get_swagger_ui_html(openapi_url="/openapi.json", title="Admin API")
 
 
-@app.get("/admin", response_class=HTMLResponse)
-async def admin_page(request: Request):
+@app.get("/api/admin/users/", summary="Список всех пользователей")
+async def admin_get_users(request: Request):
     with get_session() as session:
-        user = get_current_user(session, request)
-        if not is_admin(user):
-            raise HTTPException(status_code=403, detail="Недостаточно прав")
-    return templates.TemplateResponse(request=request, name="admin.html", context={})
+        require_admin(session, request)
+        return [orn_to_dict(u, include_relationships=False) for u in User.get_all(session)]
 
 
-@app.get("/api/admin/bootstrap")
-async def admin_bootstrap(request: Request):
+@app.get("/api/admin/users/var1/{user_id}", summary="Получить пользователя")
+async def admin_get_user(request: Request, user_id: int):
     with get_session() as session:
-        user = get_current_user(session, request)
-        if not is_admin(user):
-            raise HTTPException(status_code=403, detail="Недостаточно прав")
-        users = sorted(User.get_all(session), key=lambda x: x.id)
-        devices = sorted(Device.get_all(session), key=lambda x: x.id)
-        payments = Payment.get_all(session)
-
-        return JSONResponse(jsonable_encoder({
-            "meta": {
-                "roles": [x.value for x in UserRoles]
-            },
-            "users": [orn_to_dict(u, include_relationships=True) for u in users],
-            "devices": [orn_to_dict(device) for device in devices],
-            "payments": [orn_to_dict(payment) for payment in payments],
-        }))
-
-
-
-@app.post("/api/admin/users/", summary="Добавить пользователя")
-async def admin_add_user(request: Request):
-    with get_session() as session:
-        issuer = get_current_user(session, request)
-        if not is_admin(issuer):
-            raise HTTPException(status_code=403, detail="Недостаточно прав")
-
-        user = User.create(session)
-        return JSONResponse(jsonable_encoder(orn_to_dict(user)))
-
-
-@app.get("/api/admin/users/{user_id}/payments", summary="Получить все платежи пользователя")
-async def admin_get_user_payments(request: Request, user_id: int):
-    with get_session() as session:
-        issuer = get_current_user(session, request)
-        if not is_admin(issuer):
-            raise HTTPException(status_code=403, detail="Недостаточно прав")
-
+        require_admin(session, request)
         user = User.get_by_id(session, user_id)
-        if not user:
-            raise HTTPException(status_code=404, detail="Пользователь не найден")
+        if not user: raise HTTPException(status_code=404, detail="Не найден")
+        return orn_to_dict(user, include_relationships=True)
 
-        payments = user.payments
-        return JSONResponse(jsonable_encoder([orn_to_dict(p) for p in payments]))
-
-
-@app.post("/api/admin/users/{user_id}/payments", summary="Добавить операцию пользователю")
-async def admin_add_user_payment(request: Request, user_id: int, data: dict = Body(examples=[{"amount":0, "desc":"Описание"}])):
-    print(data)
+@app.get("/api/admin/users/var2/{device_id}", summary="Получить пользователя по устройству")
+async def admin_get_user(request: Request, device_id: int):
     with get_session() as session:
-        issuer = get_current_user(session, request)
-        if not is_admin(issuer):
-            raise HTTPException(status_code=403, detail="Недостаточно прав")
-
-        user = User.get_by_id(session, user_id)
-        if not user:
-            raise HTTPException(status_code=404, detail="Пользователь не найден")
-
-        amount = data.get("amount", 0)
-        desc = data.get("desc", "")
-
-        user.add_payment(session=session, amount=amount, desc=desc)
-        return JSONResponse({"ok": True})
+        require_admin(session, request)
+        device = Device.get_by_id(session, device_id)
+        if not device: raise HTTPException(status_code=404, detail="Не найден")
+        user = Device.get_by_id(session, device_id).owner
+        return orn_to_dict(user, include_relationships=True)
 
 
-@app.post("/api/admin/users/{user_id}/devices", summary="Добавить устройство пользователю")
-async def admin_add_device(request: Request, user_id: int, data: dict = Body(examples=[{"name": "Устройство", "ip_suffix": 0, "public_key": None}])):
+@app.post("/api/admin/users/", summary="Создать пользователя")
+async def admin_add_user(request: Request, data: UserCreate):
     with get_session() as session:
-        issuer = get_current_user(session, request)
-        if not is_admin(issuer):
-            raise HTTPException(status_code=403, detail="Недостаточно прав")
-
-        user = User.get_by_id(session, user_id)
-        if not user:
-            raise HTTPException(status_code=404, detail="Пользователь не найден")
-
-        name = str(data.get("name", "Устройство")).strip() or "Устройство"
-
-        try:
-            ip_suffix = int(data.get("ip_suffix", 0))
-        except (TypeError, ValueError):
-            raise HTTPException(status_code=400, detail="IP должен быть числом")
-
-        if ip_suffix == 0:
-            ip = Device.get_first_free_ip(session)
-            if not ip:
-                raise HTTPException(status_code=400, detail="Нет свободных IP")
-        else:
-            if not (2 <= ip_suffix <= 254):
-                raise HTTPException(status_code=400, detail="IP должен быть от 2 до 254, либо 0 для авто")
-            ip = SUBNET_PREFIX + str(ip_suffix)
-
-        if Device.get_by_ip(session, ip):
-            raise HTTPException(status_code=400, detail="IP занят!")
-
-        public_key = data.get("public_key", None)
-        if public_key is None:
-            keys = generate_keys()
-        else:
-            if not is_valid_key(public_key):
-                raise HTTPException(status_code=400, detail="Ключ некорректный!")
-            keys = {"public_key": public_key}
-
-        try:
-            device = user.add_device(
-                session=session,
-                ip=ip,
-                name=name,
-                public_key=keys["public_key"]
-            )
-            device.sync()
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
-
-        result = orn_to_dict(device)
-        result["private_key"] = keys.get("private_key", None)
-
-        return JSONResponse(jsonable_encoder(result))
+        require_admin(session, request)
+        user = User.create(session, **data.model_dump())
+        return orn_to_dict(user, include_relationships=True)
 
 
-@app.patch("/api/admin/users/{user_id}", summary="Редактировать параметры пользователя")
-async def admin_edit_user(request: Request, user_id: int, data: dict = Body(
-    examples=[{
-            "username": "Иван",
-            "role": "regular",
-            "balance": 100,
-            "monthly_fee": 100,
-            "speed": 30,
-            "next_payment": "2026-06-01T00:00:00+00:00",
-            "description": "Комментарий"
-    }]
-)):
+@app.patch("/api/admin/users/{user_id}", summary="Обновить пользователя")
+async def admin_edit_user(request: Request, user_id: int, data: UserUpdate):
     with get_session() as session:
-        issuer = require_admin(session, request)
-
+        require_admin(session, request)
         user = User.get_by_id(session, user_id)
-        if not user:
-            raise HTTPException(status_code=404, detail="Пользователь не найден")
+        if not user: raise HTTPException(status_code=404, detail="Не найден")
 
-        if not isinstance(data, dict):
-            raise HTTPException(status_code=400, detail="Тело запроса должно быть объектом JSON")
+        update_data = data.model_dump(exclude_unset=True)
+        if "next_payment" in update_data and isinstance(update_data["next_payment"], str):
+            update_data["next_payment"] = datetime.fromisoformat(update_data["next_payment"])
 
-        if "next_payment" in data and data["next_payment"] is not None:
-            try:
-                data["next_payment"] = datetime.fromisoformat(data["next_payment"])
-            except ValueError:
-                raise HTTPException(
-                    status_code=400,
-                    detail="next_payment должен быть ISO datetime, например 2026-06-01T00:00:00+00:00"
-                )
-
-        try:
-            user.change(**data)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
-
-        return JSONResponse(jsonable_encoder(orn_to_dict(user, include_relationships=True)))
+        user.change(**update_data)
+        return orn_to_dict(user, include_relationships=True)
 
 
 @app.delete("/api/admin/users/{user_id}", summary="Удалить пользователя")
 async def admin_delete_user(request: Request, user_id: int):
     with get_session() as session:
         issuer = require_admin(session, request)
-
         user = User.get_by_id(session, user_id)
-        if not user:
-            raise HTTPException(status_code=404, detail="Пользователь не найден")
+        if not user: raise HTTPException(status_code=404, detail="Не найден")
+        if issuer.id == user.id: raise HTTPException(status_code=400, detail="Нельзя удалить себя")
 
-        if issuer.id == user.id:
-            raise HTTPException(status_code=400, detail="Нельзя удалить самого себя")
+        for device in list(user.devices): device.delete(session)
+        session.delete(user)
+        return {"ok": True}
 
-        try:
-            for device in list(user.devices):
-                device.delete(session)
 
-            session.delete(user)
+@app.get("/api/admin/devices/", summary="Список всех устройств")
+async def admin_get_devices(request: Request):
+    with get_session() as session:
+        require_admin(session, request)
+        return [orn_to_dict(d) for d in Device.get_all(session)]
 
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+@app.get("/api/admin/devices/var1/{user_id}", summary="Получить устройства пользователя")
+async def admin_get_device(request: Request, user_id: int):
+    with get_session() as session:
+        require_admin(session, request)
+        devices = User.get_by_id(session,user_id).devices
+        if not devices: raise HTTPException(status_code=404, detail="Не найдено")
+        return [orn_to_dict(d) for d in devices]
 
-        return JSONResponse({"ok": True})
+@app.get("/api/admin/devices/var2/{device_id}", summary="Получить устройство")
+async def admin_get_device(request: Request, device_id: int):
+    with get_session() as session:
+        require_admin(session, request)
+        device = Device.get_by_id(session, device_id)
+        if not device: raise HTTPException(status_code=404, detail="Не найдено")
+        return orn_to_dict(device)
 
+
+@app.post("/api/admin/users/{user_id}/devices", summary="Добавить устройство")
+async def admin_add_device(request: Request, user_id: int, data: DeviceCreate):
+    with get_session() as session:
+        require_admin(session, request)
+        user = User.get_by_id(session, user_id)
+        if not user: raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+        ip = Device.get_first_free_ip(session) if data.ip_suffix == 0 else f"{SUBNET_PREFIX}{data.ip_suffix}"
+        if not ip or Device.get_by_ip(session, ip):
+            raise HTTPException(status_code=400, detail="IP занят или недоступен")
+
+        pub_key = data.public_key
+        priv_key = None
+        if not pub_key:
+            keys = generate_keys()
+            pub_key, priv_key = keys["public_key"], keys["private_key"]
+        elif not is_valid_key(pub_key):
+            raise HTTPException(status_code=400, detail="Некорректный ключ")
+
+        device = user.add_device(session, ip=ip, name=data.name, public_key=pub_key, private_key=priv_key)
+        device.sync()
+
+        result = orn_to_dict(device)
+        if priv_key:
+            result["private_key"] = priv_key
+            result[
+                "config_text"] = f"[Interface]\nPrivateKey = {priv_key}\nAddress = {device.ip}/24\nDNS = 1.1.1.1\n\n[Peer]\nPublicKey = {config.settings.SERVER_PUBLIC_KEY}\nEndpoint = {config.settings.SERVER_ENDPOINT}\nAllowedIPs = 0.0.0.0/0"
+        return result
+
+
+@app.patch("/api/admin/devices/{device_id}", summary="Обновить устройство")
+async def admin_edit_device(request: Request, device_id: int, data: DeviceUpdate):
+    with get_session() as session:
+        require_admin(session, request)
+        device = Device.get_by_id(session, device_id)
+        if not device: raise HTTPException(status_code=404, detail="Не найдено")
+        device.change(session, **data.model_dump(exclude_unset=True))
+        return orn_to_dict(device)
 
 
 @app.delete("/api/admin/devices/{device_id}", summary="Удалить устройство")
 async def admin_delete_device(request: Request, device_id: int):
     with get_session() as session:
         require_admin(session, request)
-
         device = Device.get_by_id(session, device_id)
-        if not device:
-            raise HTTPException(status_code=404, detail="Устройство не найдено")
+        if not device: raise HTTPException(status_code=404, detail="Не найдено")
+        device.delete(session)
+        return {"ok": True}
 
-        try:
-            device.delete(session)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
 
-        return JSONResponse({"ok": True})
-
-@app.patch("/api/admin/devices/{device_id}", summary="Изменить устройство")
-async def admin_edit_device(request: Request, device_id: int, data: dict = Body(
-        examples=[
-            {
-                "name": "Телефон",
-                "status": "active",
-                "ip_suffix": 15,
-                "public_key": None
-            }
-        ]
-    )
-):
+@app.get("/api/admin/payments/", summary="Список всех платежей")
+async def admin_get_payments(request: Request):
     with get_session() as session:
         require_admin(session, request)
-
-        device = Device.get_by_id(session, device_id)
-        if not device:
-            raise HTTPException(status_code=404, detail="Устройство не найдено")
-
-        if not isinstance(data, dict):
-            raise HTTPException(status_code=400, detail="Тело запроса должно быть JSON-объектом")
-
-        try:
-            device.change(session=session, **data)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
-
-        return JSONResponse(jsonable_encoder(orn_to_dict(device)))
+        return [orn_to_dict(p) for p in Payment.get_all(session)]
 
 
-
-@app.patch(
-    "/api/admin/payments/{payment_id}",
-    summary="Изменить платеж"
-)
-async def admin_edit_payment(
-    request: Request,
-    payment_id: int,
-    data: dict = Body(
-        ...,
-        examples=[
-            {
-                "amount": 150,
-                "desc": "Исправленная оплата",
-                "date": "2026-06-01T00:00:00+00:00"
-            }
-        ]
-    )
-):
+@app.get("/api/admin/users/{user_id}/payments", summary="Платежи пользователя")
+async def admin_get_user_payments(request: Request, user_id: int):
     with get_session() as session:
         require_admin(session, request)
+        user = User.get_by_id(session, user_id)
+        if not user: raise HTTPException(status_code=404, detail="Не найден")
+        return [orn_to_dict(p) for p in user.payments]
 
+
+@app.post("/api/admin/users/{user_id}/payments", summary="Добавить платеж")
+async def admin_add_user_payment(request: Request, user_id: int, data: PaymentCreate):
+    with get_session() as session:
+        require_admin(session, request)
+        user = User.get_by_id(session, user_id)
+        if not user: raise HTTPException(status_code=404, detail="Не найден")
+        user.add_payment(session, amount=data.amount, desc=data.desc)
+        return {"ok": True}
+
+
+@app.patch("/api/admin/payments/{payment_id}", summary="Обновить платеж")
+async def admin_edit_payment(request: Request, payment_id: int, data: PaymentUpdate):
+    with get_session() as session:
+        require_admin(session, request)
         payment = Payment.get_by_id(session, payment_id)
-        if not payment:
-            raise HTTPException(status_code=404, detail="Платеж не найден")
+        if not payment: raise HTTPException(status_code=404, detail="Не найден")
 
-        if not isinstance(data, dict):
-            raise HTTPException(status_code=400, detail="Тело запроса должно быть JSON-объектом")
+        update_data = data.model_dump(exclude_unset=True)
+        if "date" in update_data and isinstance(update_data["date"], str):
+            update_data["date"] = datetime.fromisoformat(update_data["date"])
 
-        if "date" in data and data["date"] is not None:
-            try:
-                data["date"] = datetime.fromisoformat(data["date"])
-            except ValueError:
-                raise HTTPException(
-                    status_code=400,
-                    detail="date должен быть ISO datetime, например 2026-06-01T00:00:00+00:00"
-                )
-
-        try:
-            payment.change(session=session, **data)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
-
-        return JSONResponse(jsonable_encoder(orn_to_dict(payment)))
+        payment.change(session, **update_data)
+        return orn_to_dict(payment)
 
 
-@app.delete(
-    "/api/admin/payments/{payment_id}",
-    summary="Удалить платеж"
-)
+@app.delete("/api/admin/payments/{payment_id}", summary="Удалить платеж")
 async def admin_delete_payment(request: Request, payment_id: int):
     with get_session() as session:
         require_admin(session, request)
-
         payment = Payment.get_by_id(session, payment_id)
-        if not payment:
-            raise HTTPException(status_code=404, detail="Платеж не найден")
+        if not payment: raise HTTPException(status_code=404, detail="Не найден")
+        payment.delete(session)
+        return {"ok": True}
+
+
+@app.post("/api/admin/sync/finances/all", summary="Проверить и синхронизировать финансы всех пользователей")
+async def sync_finances_all(request: Request):
+    with get_session() as session:
+        require_admin(session, request)
+        users = User.get_all(session)
+        for user in users:
+            user.fin_sync(session)
+        session.commit()
+        return {"ok": True, "processed": len(users)}
+
+
+@app.post("/api/admin/sync/finances/{user_id}", summary="Проверить и синхронизировать финансы пользователя")
+async def sync_finances_user(request: Request, user_id: int):
+    with get_session() as session:
+        require_admin(session, request)
+        user = User.get_by_id(session, user_id)
+        if not user: raise HTTPException(status_code=404, detail="Пользователь не найден")
+        user.fin_sync(session)
+        session.commit()
+        return {"ok": True}
+
+@app.post("/api/admin/sync/tech/all", summary="Тех. синхронизация (AWG/TC) всех пользователей")
+async def sync_tech_all(request: Request):
+    with get_session() as session:
+        require_admin(session, request)
+        users = User.get_all(session)
+        for user in users:
+            user.net_sync()
+            for device in user.devices:
+                device.sync()
+        return {"ok": True, "processed": len(users)}
+
+@app.post("/api/admin/sync/tech/{user_id}", summary="Тех. синхронизация (AWG/TC) пользователя")
+async def sync_tech_user(request: Request, user_id: int):
+    with get_session() as session:
+        require_admin(session, request)
+        user = User.get_by_id(session, user_id)
+        if not user: raise HTTPException(status_code=404, detail="Пользователь не найден")
+        user.net_sync()
+        for device in user.devices:
+            device.sync()
+        return {"ok": True}
+
+
+class KeyGenerate(BaseModel):
+    type: int = 3  # 1 - только приватный, 2 - только публичный, 3 - оба
+    private_key: str | None = None  # Опционально: если передать, то публичный будет вычислен из него
+
+
+@app.post("/api/admin/keys/generate", summary="Сгенерировать ключи AWG: 1 - приватный, 2 - публичный(если передать в аргументе), 3 - оба")
+async def admin_generate_keys(request: Request, data: KeyGenerate):
+    with get_session() as session:
+        require_admin(session, request)
+
+        if data.type not in (1, 2, 3):
+            raise HTTPException(status_code=400, detail="type должен быть 1, 2 или 3")
+
+        priv_key = data.private_key
+        pub_key = None
 
         try:
-            payment.delete(session)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            if data.type == 1:
+                if not priv_key:
+                    priv_key = generate_keys()["private_key"]
+                return {"private_key": priv_key}
 
-        return JSONResponse({"ok": True})
+            elif data.type == 2:
+                if priv_key:
+                    pub_key = get_public_key(priv_key)
+                else:
+                    raise HTTPException(status_code=400, detail="Не передан приватный ключ!")
+                return {"public_key": pub_key}
+
+            elif data.type == 3:
+                if priv_key:
+                    pub_key = get_public_key(priv_key)
+                else:
+                    keys = generate_keys()
+                    priv_key = keys["private_key"]
+                    pub_key = keys["public_key"]
+                return {"private_key": priv_key, "public_key": pub_key}
+
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Ошибка генерации: {str(e)}")
+
+@app.get("/api/admin/devices/{device_id}/config", summary="Скачать конфиг устройства")
+async def get_device_config(request: Request, device_id: int):
+    with get_session() as session:
+        require_admin(session, request)
+
+        device = Device.get_by_id(session, device_id)
+        if not device:
+            raise HTTPException(status_code=404, detail="Устройство не найдено")
+
+        config_text = f"""[Interface]
+PrivateKey = {device.private_key or "ВСТАВЬТЕ СЮДА КЛЮЧ"}
+Address = {device.ip}/24
+{SERVER_CONFIG_DATA}
+
+[Peer]
+PublicKey = {config.settings.SERVER_PUBLIC_KEY}
+Endpoint = {config.settings.SERVER_ENDPOINT}
+AllowedIPs = 0.0.0.0/0"""
+
+        return Response(
+            content=config_text,
+            media_type="text/plain",
+            headers={"Content-Disposition": f"attachment; filename={device.owner.id}_{device.id}.conf"}
+        )

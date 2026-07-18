@@ -32,6 +32,16 @@ def generate_keys() -> dict:
     return {"private_key": priv, "public_key": pub}
 
 
+def get_public_key(private_key: str) -> str:
+    """Вычисляет публичный ключ из приватного."""
+    if not is_valid_key(private_key):
+        raise ValueError("Неверный приватный ключ")
+    if DEBUG:
+        return base64.b64encode(urandom(32)).decode()
+
+    pub = subprocess.check_output(["awg", "pubkey"], input=private_key, text=True).strip()
+    return pub
+
 def add_peer(ip: str, public_key: str) -> bool:
     if not is_valid_key(public_key):
         raise ValueError("[AWG.PY | ADD_PEER] Неверный публичный ключ.")
