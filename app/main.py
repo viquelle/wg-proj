@@ -1,11 +1,13 @@
 from datetime import datetime, timedelta
+
+import uvicorn
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse, Response
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel
 
-import config.settings
+import config
 from database import get_session
 from database.models import User, Device, UserRoles, Payment
 from services.awg import generate_keys, is_valid_key, get_public_key
@@ -13,7 +15,6 @@ from utils.utils import orn_to_dict
 from config.settings import SUBNET_PREFIX, SERVER_CONFIG_DATA
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
-
 
 # --- Pydantic Models (Исправлены опечатки) ---
 class UserCreate(BaseModel):
@@ -384,3 +385,6 @@ AllowedIPs = 0.0.0.0/0"""
             media_type="text/plain",
             headers={"Content-Disposition": f"attachment; filename={device.owner.id}_{device.id}.conf"}
         )
+
+if __name__ == "__main__":
+    uvicorn.run(app, host=config.settings.LOCAL_IP, port=5000)

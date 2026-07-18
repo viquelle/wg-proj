@@ -25,6 +25,6 @@ services:
           python billing_sync.py tech;
         done
         ) &
-        uvicorn main:app --host 0.0.0.0 --port 5000
+        python main.py
       "
     restart: unless-stopped

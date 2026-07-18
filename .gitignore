@@ -1,9 +1,6 @@
 __pycache__/
 .venv/
 .idea/
-app/config/settings.py
 clients.json
 database/*.db
 database/*.bk
-test.py
-/vpn.db
