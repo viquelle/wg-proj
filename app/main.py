@@ -21,7 +21,7 @@ templates = Jinja2Templates(directory="templates")
 
 def get_request_ip(request: Request) -> str | None:
     if config.settings.DEBUG:
-        return "10.88.88.2"
+        return "10.14.201.2"
     return request.client.host if request.client else None
 
 

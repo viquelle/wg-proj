@@ -35,7 +35,7 @@ class User(Base):
 
     @property
     def is_restricted(self) -> bool:
-        return self.balance <= -self.monthly_fee
+        return self.monthly_fee != 0 and self.balance <= -self.monthly_fee
 
 
     def net_sync(self):
@@ -43,10 +43,10 @@ class User(Base):
         setup_user_class(self.id, 1 if self.is_restricted else self.speed)
 
     
-    def fin_sync(self):
+    def fin_sync(self, session: Session) -> None:
         now = now_utc()
         if self.next_payment is not None and self.next_payment < now:
-            self.balance -= self.monthly_fee
+            self.add_payment(session, -self.monthly_fee, "Ежемесячная оплата")
             self.next_payment = now + timedelta(days=30)
 
 
@@ -54,8 +54,6 @@ class User(Base):
         self.balance += amount
         payment = Payment(user_id=self.id, amount=amount, desc=desc, date=now_utc())
         session.add(payment)
-        self.fin_sync()
-        self.net_sync()
 
 
     def add_device(self, session: Session, ip: str, name: str, public_key: str) -> "Device":
@@ -149,18 +147,18 @@ class User(Base):
         return user
 
     @classmethod
-    def get_by_ip(cls, session: Session, ip: str) -> User:
+    def get_by_ip(cls, session: Session, ip: str) -> "User":
         device = Device.get_by_ip(session, ip)
         if not device:
             return None
         return device.owner
 
     @classmethod
-    def get_by_id(cls, session: Session, id: int) -> User:
+    def get_by_id(cls, session: Session, id: int) -> "User":
         return session.scalar(select(cls).where(cls.id == id))
 
     @classmethod
-    def get_all(cls, session: Session) -> list[User]:
+    def get_all(cls, session: Session) -> list["User"]:
         return list(session.scalars(select(cls)).all())
 
 
@@ -289,7 +287,7 @@ class Device(Base):
             self.name = str(kwargs["name"]).strip() or "Устройство"
 
         if kwargs.get("public_key") is not None:
-            from services.awg import is_valid_key, remove_peer
+            from app.services.awg import is_valid_key, remove_peer
 
             public_key = str(kwargs["public_key"]).strip()
 
@@ -319,11 +317,11 @@ class Payment(Base):
 
 
     @classmethod
-    def get_all(cls, session: Session) -> list[Payment]:
+    def get_all(cls, session: Session) -> list["Payment"]:
         return list(session.scalars(select(cls).order_by(cls.date.desc())).all())
 
     @classmethod
-    def get_by_id(cls, session: Session, id: int) -> Payment:
+    def get_by_id(cls, session: Session, id: int) -> "Payment":
         return session.scalars(select(cls).where(cls.id == id)).first()
 
     def change(self, session: Session, **kwargs) -> None:

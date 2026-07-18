@@ -14,7 +14,7 @@ def setup_project():
         print(f"  ✅ Папка /{folder} готова")
 
     # 2. Создаем config/settings.py, если нет
-    settings_path = os.path.join("config", "settings.py")
+    settings_path = os.path.join("app/config", "settings.py")
     if not os.path.exists(settings_path):
         with open(settings_path, "w", encoding="utf-8") as f:
             f.write("""import os
@@ -33,9 +33,8 @@ SERVER_IP = 127.0.0.1 ## измените это на IP вашего серве
         print("  ⚠️ config/settings.py уже существует")
 
     # 3. Инициализируем БД
-    from database import Base, engine
-    import database.models  # Важно для регистрации моделей
-    if not os.path.exists("database/vpn.db"):
+    from app.database import Base, engine
+    if not os.path.exists("data/vpn.db"):
         Base.metadata.create_all(engine)
         Session = sessionmaker(bind=engine)
         session = Session()

@@ -1,13 +1,12 @@
 import base64, subprocess
-from config.settings import INTERFACE_NAME, SPEED_CEIL, DEBUG
-from utils.log import log
+from config.settings import INTERFACE_NAME, DEBUG
 from os import urandom
 
 class AWGError(Exception): pass
 
 def _run(cmd):
     if DEBUG:
-        log(f"[DRY RUN] AWG: {cmd}", "DEBUG")
+        print(f"[DRY RUN] AWG: {cmd}", "DEBUG")
     else:
         subprocess.run(cmd, shell=True, check=True)
 
@@ -40,7 +39,7 @@ def add_peer(ip: str, public_key: str) -> bool:
     try: _run(cmd)
     except subprocess.CalledProcessError as e:
         raise AWGError(f"Ошибка при добавлении клиента в AWG: {e}")
-    log(f"AWG Peer добавлен: {ip}")
+    print(f"AWG Peer добавлен: {ip}")
     return True
 
 
@@ -54,6 +53,6 @@ def remove_peer(public_key: str) -> bool:
         _run(cmd)
     except subprocess.CalledProcessError as e:
         raise AWGError(f"Ошибка при удалении клиента в AWG: {e}")
-    log(f"AWG Peer удален: {public_key[:8]}...")
+    print(f"AWG Peer удален: {public_key[:8]}...")
 
     return True
