@@ -12,5 +12,19 @@ services:
       - /usr/bin/awg:/usr/bin/awg:ro
     environment:
       - DATABASE_URL=sqlite:///data/vpn.db
-      - DEBUG=false
+      - DEBUG=true
+    command: >
+      sh -c "
+        python billing_sync.py boot &&
+        python billing_sync.py fin &&
+        python billing_sync.py tech &&
+        ( 
+          while true; do
+          sleep 1800;
+          python billing_sync.py fin;
+          python billing_sync.py tech;
+        done
+        ) &
+        uvicorn main:app --host 0.0.0.0 --port 5000
+      "
     restart: unless-stopped
