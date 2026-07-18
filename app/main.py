@@ -60,7 +60,7 @@ class PaymentUpdate(BaseModel):
 
 
 def get_request_ip(request: Request) -> str | None:
-    return SUBNET_PREFIX+"2" if config.settings.DEBUG else (request.client.host if request.client else None)
+    return request.client.host if request.client else None
 
 
 def get_current_user(session, request: Request) -> User | None:
@@ -70,6 +70,7 @@ def get_current_user(session, request: Request) -> User | None:
 
 def require_admin(session, request: Request) -> User:
     user = get_current_user(session, request)
+    if config.settings.DEBUG: return user
     if not user or user.role != UserRoles.ADMIN:
         raise HTTPException(status_code=403, detail="Недостаточно прав")
     return user
@@ -95,7 +96,7 @@ async def admin_get_users(request: Request):
 
 
 @app.get("/api/admin/users/var1/{user_id}", summary="Получить пользователя")
-async def admin_get_user(request: Request, user_id: int):
+async def admin_get_user1(request: Request, user_id: int):
     with get_session() as session:
         require_admin(session, request)
         user = User.get_by_id(session, user_id)
@@ -103,12 +104,12 @@ async def admin_get_user(request: Request, user_id: int):
         return orn_to_dict(user, include_relationships=True)
 
 @app.get("/api/admin/users/var2/{device_id}", summary="Получить пользователя по устройству")
-async def admin_get_user(request: Request, device_id: int):
+async def admin_get_user2(request: Request, device_id: int):
     with get_session() as session:
         require_admin(session, request)
         device = Device.get_by_id(session, device_id)
         if not device: raise HTTPException(status_code=404, detail="Не найден")
-        user = Device.get_by_id(session, device_id).owner
+        user = device.owner
         return orn_to_dict(user, include_relationships=True)
 
 
@@ -155,7 +156,7 @@ async def admin_get_devices(request: Request):
         return [orn_to_dict(d) for d in Device.get_all(session)]
 
 @app.get("/api/admin/devices/var1/{user_id}", summary="Получить устройства пользователя")
-async def admin_get_device(request: Request, user_id: int):
+async def admin_get_device1(request: Request, user_id: int):
     with get_session() as session:
         require_admin(session, request)
         devices = User.get_by_id(session,user_id).devices
@@ -163,7 +164,7 @@ async def admin_get_device(request: Request, user_id: int):
         return [orn_to_dict(d) for d in devices]
 
 @app.get("/api/admin/devices/var2/{device_id}", summary="Получить устройство")
-async def admin_get_device(request: Request, device_id: int):
+async def admin_get_device2(request: Request, device_id: int):
     with get_session() as session:
         require_admin(session, request)
         device = Device.get_by_id(session, device_id)
