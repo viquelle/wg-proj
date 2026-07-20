@@ -1,5 +1,5 @@
 import os
-DEBUG = bool(os.getenv('DEBUG'))
+DEBUG = os.getenv('DEBUG', 'false').lower() == 'true'
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATABASE_URL = os.getenv("DATABASE_URL")
 INTERFACE_NAME = "awg0"
