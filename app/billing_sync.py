@@ -11,9 +11,14 @@ from config.settings import INTERFACE_NAME, SPEED_CEIL
 def setup_tc_boot():
     print("[BOOT] Восстановление корневой дисциплины TC...")
     from services import traffic as tc
-    tc._run(f"tc qdisc replace dev {INTERFACE_NAME} root handle 1: htb default 1")
-    tc._run(
-        f"tc class replace dev {INTERFACE_NAME} parent 1: classid 1:1 htb rate {SPEED_CEIL}Mbit ceil {SPEED_CEIL}Mbit")
+
+    try:
+        tc._run(f"tc qdisc replace dev {INTERFACE_NAME} root handle 1: htb default 1")
+        tc._run(
+            f"tc class replace dev {INTERFACE_NAME} parent 1: classid 1:1 htb rate {SPEED_CEIL}Mbit ceil {SPEED_CEIL}Mbit")
+    except Exception as e:
+        print(f"[BOOT] Пропускаем (возможно, TC уже настроен): {e}")
+
     print("[BOOT] TC готов.")
 
 
