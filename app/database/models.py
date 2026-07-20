@@ -4,6 +4,8 @@ from database import Base
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Enum, Float, Text, select
 from datetime import datetime, timezone, timedelta
 from config.settings import SUBNET_PREFIX
+from services.awg import remove_peer
+from services.traffic import delete_device_filter
 
 
 def now_utc():
@@ -28,7 +30,7 @@ class User(Base):
     description = Column(Text, nullable=True, default="")
 
     devices = relationship("Device", back_populates="owner", cascade="all, delete-orphan")
-    payments = relationship("Payment", back_populates="user")
+    payments = relationship("Payment", back_populates="user", cascade="all, delete-orphan")
 
     @property
     def is_restricted(self) -> bool:
@@ -126,7 +128,8 @@ class Device(Base):
         add_peer(self.ip, self.public_key)
 
     def delete(self, session: Session):
-        # Убраны remove_peer и delete_device_filter
+        remove_peer(self.public_key)
+        delete_device_filter(self.id)
         session.delete(self)
 
     def change(self, session: Session, **kwargs) -> None:
